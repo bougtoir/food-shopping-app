@@ -29,6 +29,12 @@ export default function DataRegistrationMode() {
         return
       }
 
+      if (videoRef.current?.srcObject) {
+        const oldStream = videoRef.current.srcObject as MediaStream
+        oldStream.getTracks().forEach(track => track.stop())
+        videoRef.current.srcObject = null
+      }
+
       let stream: MediaStream | null = null
       
       try {
@@ -217,6 +223,7 @@ export default function DataRegistrationMode() {
           <video
             ref={videoRef}
             autoPlay
+            muted
             playsInline
             className="w-full rounded-lg border-2 border-gray-300"
           />

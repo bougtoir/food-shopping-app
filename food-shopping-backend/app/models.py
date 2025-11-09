@@ -45,12 +45,22 @@ class OCRResponse(BaseModel):
 
 class CheckBatchRequest(BaseModel):
     barcodes: List[str]
-    unwanted_ingredients: List[str]
+    unwanted_ingredients: List[str] = []
 
 class AlertItem(BaseModel):
     barcode: str
     name: str
     found_ingredients: List[str]
 
+class ItemDetail(BaseModel):
+    barcode: str
+    name: str
+    ingredients: List[str]
+    allergens: List[str]
+    additives: List[str]
+    is_registered: bool
+
 class CheckBatchResponse(BaseModel):
     alerts: List[AlertItem]
+    items: List[ItemDetail]
+    unknown_barcodes: List[str]

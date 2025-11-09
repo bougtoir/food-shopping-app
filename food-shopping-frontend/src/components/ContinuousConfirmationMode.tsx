@@ -3,8 +3,8 @@ import { Button } from './ui/button'
 import { Input } from './ui/input'
 import { Alert, AlertDescription, AlertTitle } from './ui/alert'
 import { Badge } from './ui/badge'
-import { Loader2, Scan, AlertTriangle, CheckCircle2, X } from 'lucide-react'
-import { api, AlertItem } from '../api'
+import { Loader2, Scan, AlertTriangle, CheckCircle2, X, Info } from 'lucide-react'
+import { api, CheckBatchResult } from '../api'
 import { Html5Qrcode } from 'html5-qrcode'
 
 const READER_ID = 'reader-continuous'
@@ -14,7 +14,7 @@ export default function ContinuousConfirmationMode() {
   const [scannedBarcodes, setScannedBarcodes] = useState<string[]>([])
   const [unwantedIngredients, setUnwantedIngredients] = useState<string[]>([])
   const [newIngredient, setNewIngredient] = useState('')
-  const [alerts, setAlerts] = useState<AlertItem[]>([])
+  const [result, setResult] = useState<CheckBatchResult | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [loading, setLoading] = useState(false)
   const [showResults, setShowResults] = useState(false)
@@ -148,9 +148,7 @@ export default function ContinuousConfirmationMode() {
   }
 
   const handleBarcodeScanned = (barcode: string) => {
-    if (!scannedBarcodes.includes(barcode)) {
-      setScannedBarcodes(prev => [...prev, barcode])
-    }
+    setScannedBarcodes(prev => prev.includes(barcode) ? prev : [...prev, barcode])
   }
 
   const removeBarcode = (barcode: string) => {
@@ -174,18 +172,13 @@ export default function ContinuousConfirmationMode() {
       return
     }
 
-    if (unwantedIngredients.length === 0) {
-      setError('避けたい原料を設定してください')
-      return
-    }
-
     stopScanning()
     setLoading(true)
     setError(null)
     
     try {
-      const alertResults = await api.checkBatch(scannedBarcodes, unwantedIngredients)
-      setAlerts(alertResults)
+      const batchResult = await api.checkBatch(scannedBarcodes, unwantedIngredients)
+      setResult(batchResult)
       setShowResults(true)
     } catch (err) {
       setError('チェックに失敗しました')
@@ -196,7 +189,7 @@ export default function ContinuousConfirmationMode() {
 
   const reset = () => {
     setScannedBarcodes([])
-    setAlerts([])
+    setResult(null)
     setShowResults(false)
     setError(null)
   }
@@ -214,7 +207,7 @@ export default function ContinuousConfirmationMode() {
       {!showResults && (
         <>
           <div className="bg-blue-50 p-4 rounded-lg border border-blue-200">
-            <h3 className="font-semibold text-blue-900 mb-2">避けたい原料を設定</h3>
+            <h3 className="font-semibold text-blue-900 mb-2">避けたい原料を設定（任意）</h3>
             <div className="flex gap-2 mb-3">
               <Input
                 value={newIngredient}
@@ -227,7 +220,7 @@ export default function ContinuousConfirmationMode() {
             </div>
             <div className="flex flex-wrap gap-2">
               {unwantedIngredients.length === 0 ? (
-                <p className="text-sm text-gray-600">避けたい原料を追加してください</p>
+                <p className="text-sm text-gray-600">設定なし（すべての原材料を表示します）</p>
               ) : (
                 unwantedIngredients.map(ingredient => (
                   <Badge key={ingredient} variant="secondary" className="flex items-center gap-1">
@@ -310,9 +303,34 @@ export default function ContinuousConfirmationMode() {
         </>
       )}
 
-      {showResults && (
+      {showResults && result && (
         <div className="space-y-4">
-          {alerts.length === 0 ? (
+          {result.unknown_barcodes.length > 0 && (
+            <Alert variant="destructive">
+              <AlertTriangle className="h-5 w-5" />
+              <AlertTitle>未登録の商品があります</AlertTitle>
+              <AlertDescription>
+                {result.unknown_barcodes.length}個の商品が未登録です。データ登録モードで登録してください。
+                <div className="mt-2 space-y-1">
+                  {result.unknown_barcodes.map(barcode => (
+                    <div key={barcode} className="font-mono text-sm">• {barcode}</div>
+                  ))}
+                </div>
+              </AlertDescription>
+            </Alert>
+          )}
+
+          {unwantedIngredients.length > 0 && result.alerts.length > 0 && (
+            <Alert variant="destructive">
+              <AlertTriangle className="h-5 w-5" />
+              <AlertTitle>警告: 避けたい原料が含まれています</AlertTitle>
+              <AlertDescription>
+                {result.alerts.length}個の商品に避けたい原料が含まれています
+              </AlertDescription>
+            </Alert>
+          )}
+
+          {unwantedIngredients.length > 0 && result.alerts.length === 0 && result.unknown_barcodes.length === 0 && (
             <Alert className="bg-green-50 border-green-200">
               <CheckCircle2 className="h-5 w-5 text-green-600" />
               <AlertTitle className="text-green-900">問題なし</AlertTitle>
@@ -320,32 +338,60 @@ export default function ContinuousConfirmationMode() {
                 スキャンした商品に避けたい原料は含まれていません
               </AlertDescription>
             </Alert>
-          ) : (
-            <>
-              <Alert variant="destructive">
-                <AlertTriangle className="h-5 w-5" />
-                <AlertTitle>警告: 避けたい原料が含まれています</AlertTitle>
-                <AlertDescription>
-                  {alerts.length}個の商品に避けたい原料が含まれています
-                </AlertDescription>
-              </Alert>
+          )}
 
-              <div className="space-y-3">
-                {alerts.map((alert) => (
-                  <div key={alert.barcode} className="bg-red-50 border-2 border-red-300 rounded-lg p-4">
-                    <h4 className="font-bold text-red-900 mb-2">{alert.name}</h4>
-                    <p className="text-sm text-gray-600 mb-2">バーコード: {alert.barcode}</p>
-                    <div className="flex flex-wrap gap-2">
-                      {alert.found_ingredients.map(ingredient => (
-                        <Badge key={ingredient} variant="destructive">
-                          {ingredient}
-                        </Badge>
-                      ))}
+          {result.items.length > 0 && (
+            <div className="space-y-3">
+              <h3 className="font-semibold text-gray-900">商品情報</h3>
+              {result.items.map((item) => {
+                const hasAlert = result.alerts.some(a => a.barcode === item.barcode)
+                return (
+                  <div 
+                    key={item.barcode} 
+                    className={`rounded-lg p-4 ${hasAlert ? 'bg-red-50 border-2 border-red-300' : 'bg-gray-50 border border-gray-200'}`}
+                  >
+                    <h4 className={`font-bold mb-2 ${hasAlert ? 'text-red-900' : 'text-gray-900'}`}>
+                      {item.name}
+                    </h4>
+                    <p className="text-sm text-gray-600 mb-2">バーコード: {item.barcode}</p>
+                    
+                    {hasAlert && (
+                      <div className="mb-3">
+                        <p className="text-sm font-semibold text-red-900 mb-1">避けたい原料:</p>
+                        <div className="flex flex-wrap gap-2">
+                          {result.alerts.find(a => a.barcode === item.barcode)?.found_ingredients.map(ingredient => (
+                            <Badge key={ingredient} variant="destructive">
+                              {ingredient}
+                            </Badge>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+                    
+                    <div className="space-y-2 text-sm">
+                      {item.ingredients.length > 0 && (
+                        <div>
+                          <span className="font-semibold">原材料: </span>
+                          <span className="text-gray-700">{item.ingredients.join('、')}</span>
+                        </div>
+                      )}
+                      {item.allergens.length > 0 && (
+                        <div>
+                          <span className="font-semibold">アレルゲン: </span>
+                          <span className="text-gray-700">{item.allergens.join('、')}</span>
+                        </div>
+                      )}
+                      {item.additives.length > 0 && (
+                        <div>
+                          <span className="font-semibold">添加物: </span>
+                          <span className="text-gray-700">{item.additives.join('、')}</span>
+                        </div>
+                      )}
                     </div>
                   </div>
-                ))}
-              </div>
-            </>
+                )
+              })}
+            </div>
           )}
 
           <div className="text-center">

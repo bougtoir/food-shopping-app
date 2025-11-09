@@ -38,6 +38,21 @@ export interface AlertItem {
   found_ingredients: string[]
 }
 
+export interface ItemDetail {
+  barcode: string
+  name: string
+  ingredients: string[]
+  allergens: string[]
+  additives: string[]
+  is_registered: boolean
+}
+
+export interface CheckBatchResult {
+  alerts: AlertItem[]
+  items: ItemDetail[]
+  unknown_barcodes: string[]
+}
+
 export const api = {
   async registerItem(data: {
     barcode: string
@@ -85,7 +100,7 @@ export const api = {
     return data.exists
   },
 
-  async checkBatch(barcodes: string[], unwantedIngredients: string[]): Promise<AlertItem[]> {
+  async checkBatch(barcodes: string[], unwantedIngredients: string[] = []): Promise<CheckBatchResult> {
     const response = await fetch(`${API_URL}/api/items/check-batch`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -97,8 +112,7 @@ export const api = {
     if (!response.ok) {
       throw new Error('Failed to check batch')
     }
-    const data = await response.json()
-    return data.alerts
+    return response.json()
   },
 
   async listItems(): Promise<{ id: string; barcode: string; name: string }[]> {

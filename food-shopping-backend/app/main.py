@@ -4,7 +4,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from contextlib import asynccontextmanager
 from app.models import (
     FoodItem, RegisterItemRequest, OCRRequest, OCRResponse,
-    CheckBatchRequest, CheckBatchResponse, AlertItem, NutritionInfo
+    CheckBatchRequest, CheckBatchResponse, AlertItem, ItemDetail, NutritionInfo
 )
 from app.database import db_service
 from app.db_config import get_db, init_db
@@ -69,29 +69,42 @@ async def get_item(barcode: str, session: AsyncSession = Depends(get_db)):
 @app.post("/api/items/check-batch", response_model=CheckBatchResponse)
 async def check_batch(request: CheckBatchRequest, session: AsyncSession = Depends(get_db)):
     alerts = []
+    items = []
+    unknown_barcodes = []
     
     for barcode in request.barcodes:
         item = await db_service.get_item_by_barcode(session, barcode)
         if not item:
+            unknown_barcodes.append(barcode)
             continue
         
-        all_components = item.ingredients + item.allergens + item.additives
-        found_ingredients = []
+        items.append(ItemDetail(
+            barcode=item.barcode,
+            name=item.name,
+            ingredients=item.ingredients,
+            allergens=item.allergens,
+            additives=item.additives,
+            is_registered=True
+        ))
         
-        for unwanted in request.unwanted_ingredients:
-            unwanted_lower = unwanted.lower()
-            for component in all_components:
-                if unwanted_lower in component.lower():
-                    found_ingredients.append(component)
-        
-        if found_ingredients:
-            alerts.append(AlertItem(
-                barcode=item.barcode,
-                name=item.name,
-                found_ingredients=list(set(found_ingredients))
-            ))
+        if request.unwanted_ingredients:
+            all_components = item.ingredients + item.allergens + item.additives
+            found_ingredients = []
+            
+            for unwanted in request.unwanted_ingredients:
+                unwanted_lower = unwanted.lower()
+                for component in all_components:
+                    if unwanted_lower in component.lower():
+                        found_ingredients.append(component)
+            
+            if found_ingredients:
+                alerts.append(AlertItem(
+                    barcode=item.barcode,
+                    name=item.name,
+                    found_ingredients=list(set(found_ingredients))
+                ))
     
-    return CheckBatchResponse(alerts=alerts)
+    return CheckBatchResponse(alerts=alerts, items=items, unknown_barcodes=unknown_barcodes)
 
 @app.get("/api/items")
 async def list_items(session: AsyncSession = Depends(get_db)):
