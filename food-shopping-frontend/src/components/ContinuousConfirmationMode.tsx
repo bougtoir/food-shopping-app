@@ -1,7 +1,6 @@
 import { useState, useEffect } from 'react'
 import { Button } from './ui/button'
 import { Input } from './ui/input'
-import { Label } from './ui/label'
 import { Alert, AlertDescription, AlertTitle } from './ui/alert'
 import { Badge } from './ui/badge'
 import { Loader2, Scan, AlertTriangle, CheckCircle2, X } from 'lucide-react'
