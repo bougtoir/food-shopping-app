@@ -11,19 +11,24 @@ class OCRService:
         api_key = os.getenv("OPENAI_API_KEY")
         if api_key:
             self.client = OpenAI(api_key=api_key)
+            print(f"OCR Service initialized with OpenAI client (key present: {bool(api_key)})")
+        else:
+            print("OCR Service initialized WITHOUT OpenAI client (no API key)")
     
     async def process_image(self, base64_image: str) -> OCRResponse:
         """Process image with AI OCR to extract nutrition information"""
         
         if not self.client:
+            print("OCR: No OpenAI client, returning mock response")
             return self._mock_ocr_response()
         
         try:
             if "," in base64_image:
                 base64_image = base64_image.split(",")[1]
             
+            print(f"OCR: Calling OpenAI API (image size: {len(base64_image)} chars)")
             response = self.client.chat.completions.create(
-                model="gpt-4o",
+                model="gpt-4o-mini",
                 messages=[
                     {
                         "role": "user",
@@ -73,11 +78,12 @@ JSON形式で返してください:
             )
             
             content = response.choices[0].message.content
+            print(f"OCR: Received response from OpenAI (length: {len(content)} chars)")
             
             import json
             data = json.loads(content)
             
-            return OCRResponse(
+            result = OCRResponse(
                 barcode=data.get("barcode"),
                 name=data.get("name", "不明"),
                 nutrition=NutritionInfo(**data.get("nutrition", {})),
@@ -86,9 +92,14 @@ JSON形式で返してください:
                 additives=data.get("additives", []),
                 raw_text=data.get("raw_text", "")
             )
+            print(f"OCR: Successfully parsed response (barcode: {result.barcode}, name: {result.name})")
+            return result
             
         except Exception as e:
-            print(f"OCR Error: {e}")
+            print(f"OCR Error: {type(e).__name__}: {str(e)}")
+            import traceback
+            traceback.print_exc()
+            print("OCR: Falling back to mock response due to error")
             return self._mock_ocr_response()
     
     def _mock_ocr_response(self) -> OCRResponse:
