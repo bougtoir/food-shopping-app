@@ -60,8 +60,18 @@ export default function DataRegistrationMode() {
       
       if (stream && videoRef.current) {
         videoRef.current.srcObject = stream
-        setCameraActive(true)
-        setError(null)
+        videoRef.current.muted = true
+        videoRef.current.playsInline = true
+        
+        try {
+          await videoRef.current.play()
+          setCameraActive(true)
+          setError(null)
+        } catch (playErr) {
+          console.warn('video play failed', playErr)
+          setCameraActive(true)
+          setError(null)
+        }
       }
     } catch (err: any) {
       const errorName = err?.name || 'Error'

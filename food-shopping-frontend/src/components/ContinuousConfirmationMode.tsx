@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { Button } from './ui/button'
 import { Input } from './ui/input'
 import { Alert, AlertDescription, AlertTitle } from './ui/alert'
@@ -6,6 +6,8 @@ import { Badge } from './ui/badge'
 import { Loader2, Scan, AlertTriangle, CheckCircle2, X } from 'lucide-react'
 import { api, AlertItem } from '../api'
 import { Html5Qrcode } from 'html5-qrcode'
+
+const READER_ID = 'reader-continuous'
 
 export default function ContinuousConfirmationMode() {
   const [scanning, setScanning] = useState(false)
@@ -15,117 +17,134 @@ export default function ContinuousConfirmationMode() {
   const [alerts, setAlerts] = useState<AlertItem[]>([])
   const [error, setError] = useState<string | null>(null)
   const [loading, setLoading] = useState(false)
-  const [scanner, setScanner] = useState<Html5Qrcode | null>(null)
   const [showResults, setShowResults] = useState(false)
+  const scannerRef = useRef<Html5Qrcode | null>(null)
 
   useEffect(() => {
-    return () => {
-      if (scanner) {
-        scanner.stop().catch(() => {})
-      }
-    }
-  }, [scanner])
+    if (!scanning) return
 
-  const startScanning = async () => {
-    try {
-      if (!window.isSecureContext) {
-        setError('カメラアクセスにはHTTPS接続が必要です')
-        return
-      }
-      
-      if (!navigator.mediaDevices?.getUserMedia) {
-        setError('お使いのブラウザはカメラアクセスに対応していません')
-        return
-      }
-
-      const html5QrCode = new Html5Qrcode('reader')
-      setScanner(html5QrCode)
-      
+    const startScanner = async () => {
       try {
-        await html5QrCode.start(
-          { facingMode: 'environment' },
-          {
-            fps: 10,
-            qrbox: { width: 250, height: 250 }
-          },
-          (decodedText) => {
-            handleBarcodeScanned(decodedText)
-          },
-          () => {}
-        )
-        setScanning(true)
-        setError(null)
-      } catch (facingModeErr: any) {
-        console.log('facingMode failed, trying deviceId approach', facingModeErr)
+        if (!window.isSecureContext) {
+          setError('カメラアクセスにはHTTPS接続が必要です')
+          setScanning(false)
+          return
+        }
+        
+        if (!navigator.mediaDevices?.getUserMedia) {
+          setError('お使いのブラウザはカメラアクセスに対応していません')
+          setScanning(false)
+          return
+        }
+
+        await new Promise(r => requestAnimationFrame(() => r(null)))
+        
+        if (!document.getElementById(READER_ID)) {
+          setError('スキャナー領域の初期化に失敗しました')
+          setScanning(false)
+          return
+        }
+
+        const html5QrCode = new Html5Qrcode(READER_ID)
+        scannerRef.current = html5QrCode
         
         try {
-          const devices = await navigator.mediaDevices.enumerateDevices()
-          const videoDevices = devices.filter(d => d.kind === 'videoinput')
+          await html5QrCode.start(
+            { facingMode: 'environment' },
+            {
+              fps: 10,
+              qrbox: { width: 250, height: 250 }
+            },
+            (decodedText) => {
+              handleBarcodeScanned(decodedText)
+            },
+            () => {}
+          )
+          setError(null)
+        } catch (facingModeErr: any) {
+          console.log('facingMode failed, trying deviceId approach', facingModeErr)
           
-          if (videoDevices.length === 0) {
-            throw new Error('カメラが見つかりません')
+          try {
+            const devices = await navigator.mediaDevices.enumerateDevices()
+            const videoDevices = devices.filter(d => d.kind === 'videoinput')
+            
+            if (videoDevices.length === 0) {
+              throw new Error('カメラが見つかりません')
+            }
+            
+            const backCamera = videoDevices.find(d => 
+              /back|rear|environment/i.test(d.label)
+            ) || videoDevices[videoDevices.length - 1]
+            
+            await html5QrCode.start(
+              { deviceId: { exact: backCamera.deviceId } },
+              {
+                fps: 10,
+                qrbox: { width: 250, height: 250 }
+              },
+              (decodedText) => {
+                handleBarcodeScanned(decodedText)
+              },
+              () => {}
+            )
+            setError(null)
+          } catch (deviceErr: any) {
+            await html5QrCode.start(
+              { facingMode: 'user' },
+              {
+                fps: 10,
+                qrbox: { width: 250, height: 250 }
+              },
+              (decodedText) => {
+                handleBarcodeScanned(decodedText)
+              },
+              () => {}
+            )
+            setError(null)
           }
-          
-          const backCamera = videoDevices.find(d => 
-            /back|rear|environment/i.test(d.label)
-          ) || videoDevices[videoDevices.length - 1]
-          
-          await html5QrCode.start(
-            { deviceId: { exact: backCamera.deviceId } },
-            {
-              fps: 10,
-              qrbox: { width: 250, height: 250 }
-            },
-            (decodedText) => {
-              handleBarcodeScanned(decodedText)
-            },
-            () => {}
-          )
-          setScanning(true)
-          setError(null)
-        } catch (deviceErr: any) {
-          await html5QrCode.start(
-            { facingMode: 'user' },
-            {
-              fps: 10,
-              qrbox: { width: 250, height: 250 }
-            },
-            (decodedText) => {
-              handleBarcodeScanned(decodedText)
-            },
-            () => {}
-          )
-          setScanning(true)
-          setError(null)
         }
-      }
-    } catch (err: any) {
-      const errorName = err?.name || 'Error'
-      const errorMsg = err?.message || String(err)
-      console.error('[Camera Error]', errorName, errorMsg, err)
-      
-      if (errorName === 'NotAllowedError' || errorName === 'PermissionDeniedError') {
-        setError('カメラの使用が拒否されました。ブラウザの設定でカメラへのアクセスを許可してください')
-      } else if (errorName === 'NotFoundError' || errorName === 'DevicesNotFoundError') {
-        setError('カメラが見つかりません')
-      } else if (errorName === 'NotReadableError' || errorName === 'TrackStartError') {
-        setError('カメラが他のアプリで使用中です')
-      } else if (errorName === 'OverconstrainedError') {
-        setError('カメラの設定に問題があります')
-      } else if (errorName === 'SecurityError') {
-        setError('セキュリティエラー: カメラへのアクセスがブロックされています')
-      } else {
-        setError(`カメラエラー: ${errorName} - ${errorMsg}`)
+      } catch (err: any) {
+        const errorName = err?.name || 'Error'
+        const errorMsg = err?.message || String(err)
+        console.error('[Camera Error]', errorName, errorMsg, err)
+        
+        if (errorName === 'NotAllowedError' || errorName === 'PermissionDeniedError') {
+          setError('カメラの使用が拒否されました。ブラウザの設定でカメラへのアクセスを許可してください')
+        } else if (errorName === 'NotFoundError' || errorName === 'DevicesNotFoundError') {
+          setError('カメラが見つかりません')
+        } else if (errorName === 'NotReadableError' || errorName === 'TrackStartError') {
+          setError('カメラが他のアプリで使用中です')
+        } else if (errorName === 'OverconstrainedError') {
+          setError('カメラの設定に問題があります')
+        } else if (errorName === 'SecurityError') {
+          setError('セキュリティエラー: カメラへのアクセスがブロックされています')
+        } else {
+          setError(`カメラエラー: ${errorName} - ${errorMsg}`)
+        }
+        setScanning(false)
       }
     }
+
+    startScanner()
+
+    return () => {
+      if (scannerRef.current) {
+        scannerRef.current.stop()
+          .catch(() => {})
+          .finally(() => {
+            scannerRef.current?.clear()
+            scannerRef.current = null
+          })
+      }
+    }
+  }, [scanning])
+
+  const startScanning = () => {
+    setScanning(true)
   }
 
   const stopScanning = () => {
-    if (scanner) {
-      scanner.stop().then(() => {
-        setScanning(false)
-      }).catch(() => {})
-    }
+    setScanning(false)
   }
 
   const handleBarcodeScanned = (barcode: string) => {
@@ -250,6 +269,8 @@ export default function ContinuousConfirmationMode() {
             )}
           </div>
 
+          <div id={READER_ID} className={scanning ? 'w-full' : 'w-full hidden'}></div>
+
           {!scanning && (
             <div className="flex gap-4 justify-center">
               <Button onClick={startScanning} size="lg" className="flex items-center gap-2">
@@ -272,21 +293,18 @@ export default function ContinuousConfirmationMode() {
           )}
 
           {scanning && (
-            <div className="space-y-4">
-              <div id="reader" className="w-full"></div>
-              <div className="flex gap-4 justify-center">
-                <Button onClick={stopScanning} variant="outline">一時停止</Button>
-                <Button onClick={finishScanning} disabled={loading}>
-                  {loading ? (
-                    <>
-                      <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                      チェック中...
-                    </>
-                  ) : (
-                    'スキャン完了・チェック'
-                  )}
-                </Button>
-              </div>
+            <div className="flex gap-4 justify-center">
+              <Button onClick={stopScanning} variant="outline">一時停止</Button>
+              <Button onClick={finishScanning} disabled={loading}>
+                {loading ? (
+                  <>
+                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                    チェック中...
+                  </>
+                ) : (
+                  'スキャン完了・チェック'
+                )}
+              </Button>
             </div>
           )}
         </>
