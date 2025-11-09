@@ -1,6 +1,6 @@
-from typing import Optional, List
+from typing import Optional, List, Tuple
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select
+from sqlalchemy import select, func, or_
 from app.models import FoodItem, NutritionInfo
 from app.db_models import FoodItemDB
 from datetime import datetime
@@ -65,6 +65,50 @@ class DatabaseService:
             {"id": item.id, "barcode": item.barcode, "name": item.name}
             for item in db_items
         ]
+    
+    @staticmethod
+    async def search_items(
+        session: AsyncSession, 
+        query: Optional[str] = None,
+        page: int = 1,
+        limit: int = 20
+    ) -> Tuple[List[FoodItem], int]:
+        """Search items with pagination. Returns (items, total_count)"""
+        stmt = select(FoodItemDB)
+        count_stmt = select(func.count()).select_from(FoodItemDB)
+        
+        if query:
+            search_filter = or_(
+                FoodItemDB.barcode.ilike(f"%{query}%"),
+                FoodItemDB.name.ilike(f"%{query}%")
+            )
+            stmt = stmt.where(search_filter)
+            count_stmt = count_stmt.where(search_filter)
+        
+        total_result = await session.execute(count_stmt)
+        total = total_result.scalar()
+        
+        stmt = stmt.order_by(FoodItemDB.created_at.desc())
+        stmt = stmt.offset((page - 1) * limit).limit(limit)
+        result = await session.execute(stmt)
+        db_items = result.scalars().all()
+        
+        items = [
+            FoodItem(
+                id=item.id,
+                barcode=item.barcode,
+                name=item.name,
+                nutrition=NutritionInfo(**item.nutrition),
+                ingredients=item.ingredients,
+                allergens=item.allergens,
+                additives=item.additives,
+                created_at=item.created_at,
+                updated_at=item.updated_at
+            )
+            for item in db_items
+        ]
+        
+        return items, total
     
     @staticmethod
     async def item_exists(session: AsyncSession, barcode: str) -> bool:

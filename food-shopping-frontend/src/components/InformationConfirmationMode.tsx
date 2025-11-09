@@ -1,9 +1,10 @@
 import { useState, useEffect, useRef } from 'react'
 import { Button } from './ui/button'
 import { Alert, AlertDescription } from './ui/alert'
-import { Loader2, Scan } from 'lucide-react'
+import { Loader2, Scan, Search, ChevronDown, ChevronUp } from 'lucide-react'
 import { api, FoodItem } from '../api'
 import { Html5Qrcode } from 'html5-qrcode'
+import { Input } from './ui/input'
 
 const READER_ID = 'reader-information'
 
@@ -13,6 +14,15 @@ export default function InformationConfirmationMode() {
   const [error, setError] = useState<string | null>(null)
   const [loading, setLoading] = useState(false)
   const scannerRef = useRef<Html5Qrcode | null>(null)
+  
+  const [showBrowse, setShowBrowse] = useState(false)
+  const [searchQuery, setSearchQuery] = useState('')
+  const [searchResults, setSearchResults] = useState<FoodItem[]>([])
+  const [searchLoading, setSearchLoading] = useState(false)
+  const [currentPage, setCurrentPage] = useState(1)
+  const [totalPages, setTotalPages] = useState(0)
+  const [total, setTotal] = useState(0)
+  const [expandedItemId, setExpandedItemId] = useState<string | null>(null)
 
   useEffect(() => {
     if (!scanning) return
@@ -32,6 +42,7 @@ export default function InformationConfirmationMode() {
         }
 
         await new Promise(r => requestAnimationFrame(() => r(null)))
+        await new Promise(r => setTimeout(() => r(null), 100))
         
         if (!document.getElementById(READER_ID)) {
           setError('スキャナー領域の初期化に失敗しました')
@@ -51,7 +62,6 @@ export default function InformationConfirmationMode() {
             },
             async (decodedText) => {
               await handleBarcodeScanned(decodedText)
-              html5QrCode.stop().catch(() => {})
               setScanning(false)
             },
             () => {}
@@ -80,7 +90,6 @@ export default function InformationConfirmationMode() {
               },
               async (decodedText) => {
                 await handleBarcodeScanned(decodedText)
-                html5QrCode.stop().catch(() => {})
                 setScanning(false)
               },
               () => {}
@@ -95,7 +104,6 @@ export default function InformationConfirmationMode() {
               },
               async (decodedText) => {
                 await handleBarcodeScanned(decodedText)
-                html5QrCode.stop().catch(() => {})
                 setScanning(false)
               },
               () => {}
@@ -158,6 +166,7 @@ export default function InformationConfirmationMode() {
       if (exists) {
         const itemData = await api.getItem(barcode)
         setItem(itemData)
+        setShowBrowse(false)
       } else {
         setError('この商品は登録されていません。データ登録モードで登録してください。')
       }
@@ -167,6 +176,34 @@ export default function InformationConfirmationMode() {
       setLoading(false)
     }
   }
+
+  const handleSearch = async (page: number = 1) => {
+    setSearchLoading(true)
+    setError(null)
+    try {
+      const result = await api.searchItems(searchQuery || undefined, page, 20)
+      setSearchResults(result.items)
+      setCurrentPage(result.page)
+      setTotalPages(result.total_pages)
+      setTotal(result.total)
+    } catch (err) {
+      setError('検索に失敗しました')
+    } finally {
+      setSearchLoading(false)
+    }
+  }
+
+  const handleViewItem = (selectedItem: FoodItem) => {
+    setItem(selectedItem)
+    setShowBrowse(false)
+    setScanning(false)
+  }
+
+  useEffect(() => {
+    if (showBrowse) {
+      handleSearch(1)
+    }
+  }, [showBrowse])
 
   return (
     <div className="space-y-6">
@@ -178,20 +215,154 @@ export default function InformationConfirmationMode() {
         </Alert>
       )}
 
-      <div id={READER_ID} className={scanning ? 'w-full' : 'w-full hidden'}></div>
+      <div 
+        id={READER_ID} 
+        style={{ width: '100%', minHeight: scanning ? '320px' : '0' }}
+        className={scanning ? 'w-full' : 'w-full invisible h-0'}
+      ></div>
 
-      {!scanning && !item && (
-        <div className="text-center">
-          <Button onClick={startScanning} size="lg" className="flex items-center gap-2 mx-auto">
-            <Scan size={24} />
-            バーコードをスキャン
-          </Button>
+      {!scanning && !item && !showBrowse && (
+        <div className="space-y-4">
+          <div className="text-center">
+            <Button onClick={startScanning} size="lg" className="flex items-center gap-2 mx-auto">
+              <Scan size={24} />
+              バーコードをスキャン
+            </Button>
+          </div>
+          <div className="text-center">
+            <Button onClick={() => setShowBrowse(true)} variant="outline" className="flex items-center gap-2 mx-auto">
+              <Search size={20} />
+              登録データを検索/一覧
+            </Button>
+          </div>
         </div>
       )}
 
       {scanning && (
         <div className="text-center">
           <Button onClick={stopScanning} variant="outline">スキャン停止</Button>
+        </div>
+      )}
+
+      {showBrowse && !item && (
+        <div className="space-y-4">
+          <div className="flex gap-2">
+            <Input
+              type="text"
+              placeholder="商品名またはバーコードで検索"
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              onKeyPress={(e) => e.key === 'Enter' && handleSearch(1)}
+            />
+            <Button onClick={() => handleSearch(1)} disabled={searchLoading}>
+              <Search size={20} />
+            </Button>
+          </div>
+
+          {searchLoading && (
+            <div className="text-center py-4">
+              <Loader2 className="h-6 w-6 animate-spin mx-auto text-indigo-600" />
+            </div>
+          )}
+
+          {!searchLoading && searchResults.length > 0 && (
+            <div className="space-y-2">
+              <p className="text-sm text-gray-600">
+                {total}件中 {(currentPage - 1) * 20 + 1}〜{Math.min(currentPage * 20, total)}件を表示
+              </p>
+              {searchResults.map((resultItem) => (
+                <div key={resultItem.id} className="border rounded-lg p-3 bg-white">
+                  <div className="flex justify-between items-start">
+                    <div className="flex-1">
+                      <h4 className="font-semibold text-gray-900">{resultItem.name}</h4>
+                      <p className="text-sm text-gray-600 font-mono">{resultItem.barcode}</p>
+                    </div>
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      onClick={() => {
+                        if (expandedItemId === resultItem.id) {
+                          setExpandedItemId(null)
+                        } else {
+                          setExpandedItemId(resultItem.id)
+                        }
+                      }}
+                    >
+                      {expandedItemId === resultItem.id ? <ChevronUp size={16} /> : <ChevronDown size={16} />}
+                    </Button>
+                  </div>
+                  
+                  {expandedItemId === resultItem.id && (
+                    <div className="mt-3 pt-3 border-t space-y-2">
+                      <div className="text-sm">
+                        <p className="text-gray-600 mb-1">栄養成分</p>
+                        <div className="grid grid-cols-2 gap-1 text-xs">
+                          <div>カロリー: {resultItem.nutrition.calories || '-'} kcal</div>
+                          <div>タンパク質: {resultItem.nutrition.protein || '-'} g</div>
+                          <div>脂質: {resultItem.nutrition.fat || '-'} g</div>
+                          <div>炭水化物: {resultItem.nutrition.carbohydrates || '-'} g</div>
+                        </div>
+                      </div>
+                      
+                      {resultItem.ingredients.length > 0 && (
+                        <div className="text-sm">
+                          <p className="text-gray-600 mb-1">原材料</p>
+                          <p className="text-xs">{resultItem.ingredients.join(', ')}</p>
+                        </div>
+                      )}
+                      
+                      {resultItem.allergens.length > 0 && (
+                        <div className="text-sm">
+                          <p className="text-orange-700 font-semibold mb-1">アレルゲン</p>
+                          <p className="text-xs text-orange-900">{resultItem.allergens.join(', ')}</p>
+                        </div>
+                      )}
+                      
+                      <Button size="sm" onClick={() => handleViewItem(resultItem)} className="w-full mt-2">
+                        詳細を表示
+                      </Button>
+                    </div>
+                  )}
+                </div>
+              ))}
+
+              {totalPages > 1 && (
+                <div className="flex justify-center gap-2 pt-4">
+                  <Button
+                    onClick={() => handleSearch(currentPage - 1)}
+                    disabled={currentPage === 1 || searchLoading}
+                    variant="outline"
+                    size="sm"
+                  >
+                    前へ
+                  </Button>
+                  <span className="py-2 px-3 text-sm">
+                    {currentPage} / {totalPages}
+                  </span>
+                  <Button
+                    onClick={() => handleSearch(currentPage + 1)}
+                    disabled={currentPage === totalPages || searchLoading}
+                    variant="outline"
+                    size="sm"
+                  >
+                    次へ
+                  </Button>
+                </div>
+              )}
+            </div>
+          )}
+
+          {!searchLoading && searchResults.length === 0 && (
+            <p className="text-center text-gray-600 py-4">
+              {searchQuery ? '検索結果がありません' : '登録されている商品がありません'}
+            </p>
+          )}
+
+          <div className="text-center">
+            <Button onClick={() => { setShowBrowse(false); setSearchQuery(''); setSearchResults([]); }} variant="outline">
+              戻る
+            </Button>
+          </div>
         </div>
       )}
 

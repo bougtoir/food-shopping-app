@@ -1,10 +1,12 @@
-from fastapi import FastAPI, HTTPException, Depends
+from fastapi import FastAPI, HTTPException, Depends, Query
+from typing import Optional
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy.ext.asyncio import AsyncSession
 from contextlib import asynccontextmanager
 from app.models import (
     FoodItem, RegisterItemRequest, OCRRequest, OCRResponse,
-    CheckBatchRequest, CheckBatchResponse, AlertItem, ItemDetail, NutritionInfo
+    CheckBatchRequest, CheckBatchResponse, AlertItem, ItemDetail, NutritionInfo,
+    SearchItemsResponse
 )
 from app.database import db_service
 from app.db_config import get_db, init_db
@@ -106,10 +108,29 @@ async def check_batch(request: CheckBatchRequest, session: AsyncSession = Depend
     
     return CheckBatchResponse(alerts=alerts, items=items, unknown_barcodes=unknown_barcodes)
 
-@app.get("/api/items")
-async def list_items(session: AsyncSession = Depends(get_db)):
-    items = await db_service.get_all_items(session)
-    return items
+@app.get("/api/items", response_model=SearchItemsResponse)
+async def search_items(
+    q: Optional[str] = None,
+    page: int = 1,
+    limit: int = 20,
+    session: AsyncSession = Depends(get_db)
+):
+    """Search items with optional query and pagination"""
+    if page < 1:
+        page = 1
+    if limit < 1 or limit > 100:
+        limit = 20
+    
+    items, total = await db_service.search_items(session, q, page, limit)
+    total_pages = (total + limit - 1) // limit
+    
+    return SearchItemsResponse(
+        items=items,
+        total=total,
+        page=page,
+        limit=limit,
+        total_pages=total_pages
+    )
 
 @app.get("/api/items/exists/{barcode}")
 async def check_item_exists(barcode: str, session: AsyncSession = Depends(get_db)):

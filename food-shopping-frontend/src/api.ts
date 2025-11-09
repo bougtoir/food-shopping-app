@@ -53,6 +53,14 @@ export interface CheckBatchResult {
   unknown_barcodes: string[]
 }
 
+export interface SearchItemsResponse {
+  items: FoodItem[]
+  total: number
+  page: number
+  limit: number
+  total_pages: number
+}
+
 export const api = {
   async registerItem(data: {
     barcode: string
@@ -117,6 +125,19 @@ export const api = {
 
   async listItems(): Promise<{ id: string; barcode: string; name: string }[]> {
     const response = await fetch(`${API_URL}/api/items`)
+    return response.json()
+  },
+
+  async searchItems(query?: string, page: number = 1, limit: number = 20): Promise<SearchItemsResponse> {
+    const params = new URLSearchParams()
+    if (query) params.append('q', query)
+    params.append('page', page.toString())
+    params.append('limit', limit.toString())
+    
+    const response = await fetch(`${API_URL}/api/items?${params.toString()}`)
+    if (!response.ok) {
+      throw new Error('Failed to search items')
+    }
     return response.json()
   },
 }

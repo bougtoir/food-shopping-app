@@ -64,3 +64,10 @@ class CheckBatchResponse(BaseModel):
     alerts: List[AlertItem]
     items: List[ItemDetail]
     unknown_barcodes: List[str]
+
+class SearchItemsResponse(BaseModel):
+    items: List[FoodItem]
+    total: int
+    page: int
+    limit: int
+    total_pages: int
