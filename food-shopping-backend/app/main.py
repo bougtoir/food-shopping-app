@@ -34,6 +34,12 @@ app.add_middleware(
 async def healthz():
     return {"status": "ok"}
 
+@app.get("/api/health/ocr")
+async def ocr_health():
+    """Health check endpoint for OCR service"""
+    status = ocr_service.get_status()
+    return status
+
 @app.post("/api/items/register", response_model=FoodItem)
 async def register_item(request: RegisterItemRequest, session: AsyncSession = Depends(get_db)):
     

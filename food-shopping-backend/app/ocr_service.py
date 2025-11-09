@@ -1,32 +1,59 @@
 import base64
 import os
+import logging
 from typing import Optional
 from openai import OpenAI
 from app.models import OCRResponse, NutritionInfo
 import re
 
+logger = logging.getLogger(__name__)
+
 class OCRService:
     def __init__(self):
         self.client = None
+        self._initialized = False
+    
+    def _ensure_client(self):
+        """Lazy initialization of OpenAI client"""
+        if self._initialized:
+            return
+        
+        self._initialized = True
         api_key = os.getenv("OPENAI_API_KEY")
         if api_key:
-            self.client = OpenAI(api_key=api_key)
-            print(f"OCR Service initialized with OpenAI client (key present: {bool(api_key)})")
+            try:
+                self.client = OpenAI(api_key=api_key)
+                logger.info(f"OCR Service initialized with OpenAI client (key present: {bool(api_key)})")
+            except Exception as e:
+                logger.error(f"Failed to initialize OpenAI client: {e}")
+                self.client = None
         else:
-            print("OCR Service initialized WITHOUT OpenAI client (no API key)")
+            logger.warning("OCR Service initialized WITHOUT OpenAI client (no API key)")
+            self.client = None
+    
+    def get_status(self) -> dict:
+        """Get OCR service status for health checks"""
+        self._ensure_client()
+        api_key = os.getenv("OPENAI_API_KEY")
+        return {
+            "env_has_key": bool(api_key),
+            "client_initialized": self.client is not None
+        }
     
     async def process_image(self, base64_image: str) -> OCRResponse:
         """Process image with AI OCR to extract nutrition information"""
         
+        self._ensure_client()
+        
         if not self.client:
-            print("OCR: No OpenAI client, returning mock response")
+            logger.warning("OCR: No OpenAI client, returning mock response")
             return self._mock_ocr_response()
         
         try:
             if "," in base64_image:
                 base64_image = base64_image.split(",")[1]
             
-            print(f"OCR: Calling OpenAI API (image size: {len(base64_image)} chars)")
+            logger.info(f"OCR: Calling OpenAI API (image size: {len(base64_image)} chars)")
             response = self.client.chat.completions.create(
                 model="gpt-4o-mini",
                 messages=[
@@ -78,7 +105,7 @@ JSON形式で返してください:
             )
             
             content = response.choices[0].message.content
-            print(f"OCR: Received response from OpenAI (length: {len(content)} chars)")
+            logger.info(f"OCR: Received response from OpenAI (length: {len(content)} chars)")
             
             import json
             data = json.loads(content)
@@ -92,14 +119,12 @@ JSON形式で返してください:
                 additives=data.get("additives", []),
                 raw_text=data.get("raw_text", "")
             )
-            print(f"OCR: Successfully parsed response (barcode: {result.barcode}, name: {result.name})")
+            logger.info(f"OCR: Successfully parsed response (barcode: {result.barcode}, name: {result.name})")
             return result
             
         except Exception as e:
-            print(f"OCR Error: {type(e).__name__}: {str(e)}")
-            import traceback
-            traceback.print_exc()
-            print("OCR: Falling back to mock response due to error")
+            logger.error(f"OCR Error: {type(e).__name__}: {str(e)}", exc_info=True)
+            logger.warning("OCR: Falling back to mock response due to error")
             return self._mock_ocr_response()
     
     def _mock_ocr_response(self) -> OCRResponse:
