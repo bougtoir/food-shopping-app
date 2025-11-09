@@ -1,10 +1,13 @@
-import { useState, useRef } from 'react'
+import { useState, useRef, useEffect } from 'react'
 import { Button } from './ui/button'
 import { Input } from './ui/input'
 import { Label } from './ui/label'
 import { Alert, AlertDescription } from './ui/alert'
-import { Camera, Upload, Loader2 } from 'lucide-react'
+import { Camera, Upload, Loader2, Scan } from 'lucide-react'
 import { api, OCRResponse } from '../api'
+import { Html5Qrcode } from 'html5-qrcode'
+
+const READER_ID = 'reader-registration'
 
 export default function DataRegistrationMode() {
   const [image, setImage] = useState<string | null>(null)
@@ -15,9 +18,17 @@ export default function DataRegistrationMode() {
   const videoRef = useRef<HTMLVideoElement>(null)
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const [cameraActive, setCameraActive] = useState(false)
+  const [videoReady, setVideoReady] = useState(false)
   const fileInputRef = useRef<HTMLInputElement>(null)
+  const [scanning, setScanning] = useState(false)
+  const [scannedBarcode, setScannedBarcode] = useState<string>('')
+  const scannerRef = useRef<Html5Qrcode | null>(null)
 
   const startCamera = async () => {
+    if (scanning) {
+      stopScanning()
+    }
+    
     try {
       if (!window.isSecureContext) {
         setError('カメラアクセスにはHTTPS接続が必要です')
@@ -34,6 +45,10 @@ export default function DataRegistrationMode() {
         oldStream.getTracks().forEach(track => track.stop())
         videoRef.current.srcObject = null
       }
+
+      setCameraActive(true)
+      setVideoReady(false)
+      await new Promise(r => requestAnimationFrame(() => r(null)))
 
       let stream: MediaStream | null = null
       
@@ -54,7 +69,7 @@ export default function DataRegistrationMode() {
           
           const backCamera = videoDevices.find(d => 
             /back|rear|environment/i.test(d.label)
-          ) || videoDevices[videoDevices.length - 1] // fallback to last camera
+          ) || videoDevices[videoDevices.length - 1]
           
           stream = await navigator.mediaDevices.getUserMedia({
             video: { deviceId: { exact: backCamera.deviceId } }
@@ -66,23 +81,29 @@ export default function DataRegistrationMode() {
       
       if (stream && videoRef.current) {
         videoRef.current.srcObject = stream
-        videoRef.current.muted = true
-        videoRef.current.playsInline = true
         
         try {
           await videoRef.current.play()
-          setCameraActive(true)
           setError(null)
-        } catch (playErr) {
-          console.warn('video play failed', playErr)
-          setCameraActive(true)
-          setError(null)
+        } catch (playErr: any) {
+          console.error('video play failed', playErr)
+          stream.getTracks().forEach(track => track.stop())
+          setCameraActive(false)
+          setError(`カメラの再生に失敗しました: ${playErr.message || String(playErr)}`)
         }
+      } else {
+        if (stream) {
+          stream.getTracks().forEach(track => track.stop())
+        }
+        setCameraActive(false)
+        setError('カメラの初期化に失敗しました')
       }
     } catch (err: any) {
       const errorName = err?.name || 'Error'
       const errorMsg = err?.message || String(err)
       console.error('[Camera Error]', errorName, errorMsg, err)
+      
+      setCameraActive(false)
       
       if (errorName === 'NotAllowedError' || errorName === 'PermissionDeniedError') {
         setError('カメラの使用が拒否されました。ブラウザの設定でカメラへのアクセスを許可してください')
@@ -106,11 +127,172 @@ export default function DataRegistrationMode() {
       stream.getTracks().forEach(track => track.stop())
       videoRef.current.srcObject = null
       setCameraActive(false)
+      setVideoReady(false)
     }
   }
 
+  const startScanning = () => {
+    if (cameraActive) {
+      stopCamera()
+    }
+    setScanning(true)
+  }
+
+  const stopScanning = () => {
+    setScanning(false)
+  }
+
+  useEffect(() => {
+    if (!scanning) return
+
+    const startScanner = async () => {
+      try {
+        if (!window.isSecureContext) {
+          setError('カメラアクセスにはHTTPS接続が必要です')
+          setScanning(false)
+          return
+        }
+        
+        if (!navigator.mediaDevices?.getUserMedia) {
+          setError('お使いのブラウザはカメラアクセスに対応していません')
+          setScanning(false)
+          return
+        }
+
+        await new Promise(r => requestAnimationFrame(() => r(null)))
+        
+        if (!document.getElementById(READER_ID)) {
+          setError('スキャナー領域の初期化に失敗しました')
+          setScanning(false)
+          return
+        }
+
+        const html5QrCode = new Html5Qrcode(READER_ID)
+        scannerRef.current = html5QrCode
+        
+        try {
+          await html5QrCode.start(
+            { facingMode: 'environment' },
+            {
+              fps: 10,
+              qrbox: { width: 250, height: 250 }
+            },
+            (decodedText) => {
+              setScannedBarcode(decodedText)
+              stopScanning()
+            },
+            () => {}
+          )
+          setError(null)
+        } catch (facingModeErr: any) {
+          console.log('facingMode failed, trying deviceId approach', facingModeErr)
+          
+          try {
+            const devices = await navigator.mediaDevices.enumerateDevices()
+            const videoDevices = devices.filter(d => d.kind === 'videoinput')
+            
+            if (videoDevices.length === 0) {
+              throw new Error('カメラが見つかりません')
+            }
+            
+            const backCamera = videoDevices.find(d => 
+              /back|rear|environment/i.test(d.label)
+            ) || videoDevices[videoDevices.length - 1]
+            
+            await html5QrCode.start(
+              { deviceId: { exact: backCamera.deviceId } },
+              {
+                fps: 10,
+                qrbox: { width: 250, height: 250 }
+              },
+              (decodedText) => {
+                setScannedBarcode(decodedText)
+                stopScanning()
+              },
+              () => {}
+            )
+            setError(null)
+          } catch (deviceErr: any) {
+            await html5QrCode.start(
+              { facingMode: 'user' },
+              {
+                fps: 10,
+                qrbox: { width: 250, height: 250 }
+              },
+              (decodedText) => {
+                setScannedBarcode(decodedText)
+                stopScanning()
+              },
+              () => {}
+            )
+            setError(null)
+          }
+        }
+      } catch (err: any) {
+        const errorName = err?.name || 'Error'
+        const errorMsg = err?.message || String(err)
+        console.error('[Camera Error]', errorName, errorMsg, err)
+        
+        if (errorName === 'NotAllowedError' || errorName === 'PermissionDeniedError') {
+          setError('カメラの使用が拒否されました。ブラウザの設定でカメラへのアクセスを許可してください')
+        } else if (errorName === 'NotFoundError' || errorName === 'DevicesNotFoundError') {
+          setError('カメラが見つかりません')
+        } else if (errorName === 'NotReadableError' || errorName === 'TrackStartError') {
+          setError('カメラが他のアプリで使用中です')
+        } else if (errorName === 'OverconstrainedError') {
+          setError('カメラの設定に問題があります')
+        } else if (errorName === 'SecurityError') {
+          setError('セキュリティエラー: カメラへのアクセスがブロックされています')
+        } else {
+          setError(`カメラエラー: ${errorName} - ${errorMsg}`)
+        }
+        setScanning(false)
+      }
+    }
+
+    startScanner()
+
+    return () => {
+      if (scannerRef.current) {
+        scannerRef.current.stop()
+          .catch(() => {})
+          .finally(() => {
+            scannerRef.current?.clear()
+            scannerRef.current = null
+          })
+      }
+    }
+  }, [scanning])
+
+  useEffect(() => {
+    const video = videoRef.current
+    if (!video) return
+
+    const handleLoadedMetadata = () => {
+      if (video.videoWidth > 0 && video.videoHeight > 0) {
+        setVideoReady(true)
+      }
+    }
+
+    video.addEventListener('loadedmetadata', handleLoadedMetadata)
+    return () => video.removeEventListener('loadedmetadata', handleLoadedMetadata)
+  }, [cameraActive])
+
+  useEffect(() => {
+    return () => {
+      if (videoRef.current?.srcObject) {
+        const stream = videoRef.current.srcObject as MediaStream
+        stream.getTracks().forEach(track => track.stop())
+      }
+      if (scannerRef.current) {
+        scannerRef.current.stop().catch(() => {})
+        scannerRef.current.clear()
+      }
+    }
+  }, [])
+
   const captureImage = () => {
-    if (videoRef.current && canvasRef.current) {
+    if (videoRef.current && canvasRef.current && videoReady) {
       const video = videoRef.current
       const canvas = canvasRef.current
       canvas.width = video.videoWidth
@@ -159,7 +341,7 @@ export default function DataRegistrationMode() {
     setSuccess(null)
     try {
       await api.registerItem({
-        barcode: ocrResult.barcode || '',
+        barcode: ocrResult.barcode || scannedBarcode || '',
         name: ocrResult.name || '不明',
         nutrition: ocrResult.nutrition,
         ingredients: ocrResult.ingredients,
@@ -169,6 +351,7 @@ export default function DataRegistrationMode() {
       setSuccess('商品を登録しました')
       setImage(null)
       setOcrResult(null)
+      setScannedBarcode('')
     } catch (err) {
       setError(err instanceof Error ? err.message : '登録に失敗しました')
     } finally {
@@ -192,21 +375,37 @@ export default function DataRegistrationMode() {
         </Alert>
       )}
 
-      {!image && !cameraActive && (
+      {scannedBarcode && (
+        <Alert className="bg-blue-50 border-blue-200">
+          <AlertDescription className="text-blue-800">
+            バーコード: {scannedBarcode}
+          </AlertDescription>
+        </Alert>
+      )}
+
+      {!image && !cameraActive && !scanning && (
         <div className="space-y-4">
-          <div className="flex gap-4 justify-center">
-            <Button onClick={startCamera} className="flex items-center gap-2">
-              <Camera size={20} />
-              カメラを起動
-            </Button>
-            <Button 
-              onClick={() => fileInputRef.current?.click()} 
-              variant="outline"
-              className="flex items-center gap-2"
-            >
-              <Upload size={20} />
-              画像をアップロード
-            </Button>
+          <div className="flex flex-col gap-4">
+            <div className="flex gap-4 justify-center">
+              <Button onClick={startScanning} className="flex items-center gap-2">
+                <Scan size={20} />
+                バーコード読み取り
+              </Button>
+            </div>
+            <div className="flex gap-4 justify-center">
+              <Button onClick={startCamera} className="flex items-center gap-2" variant="outline">
+                <Camera size={20} />
+                ラベル撮影（カメラ起動）
+              </Button>
+              <Button 
+                onClick={() => fileInputRef.current?.click()} 
+                variant="outline"
+                className="flex items-center gap-2"
+              >
+                <Upload size={20} />
+                画像をアップロード
+              </Button>
+            </div>
           </div>
           <input
             ref={fileInputRef}
@@ -218,19 +417,26 @@ export default function DataRegistrationMode() {
         </div>
       )}
 
+      <div id={READER_ID} className={scanning ? '' : 'hidden'} />
+
+      {scanning && (
+        <div className="flex gap-4 justify-center">
+          <Button onClick={stopScanning} variant="outline">スキャン停止</Button>
+        </div>
+      )}
+
+      <video
+        ref={videoRef}
+        autoPlay
+        muted
+        playsInline
+        className={cameraActive ? "w-full rounded-lg border-2 border-gray-300" : "hidden"}
+      />
+
       {cameraActive && (
-        <div className="space-y-4">
-          <video
-            ref={videoRef}
-            autoPlay
-            muted
-            playsInline
-            className="w-full rounded-lg border-2 border-gray-300"
-          />
-          <div className="flex gap-4 justify-center">
-            <Button onClick={captureImage}>撮影</Button>
-            <Button onClick={stopCamera} variant="outline">キャンセル</Button>
-          </div>
+        <div className="flex gap-4 justify-center">
+          <Button onClick={captureImage} disabled={!videoReady}>撮影</Button>
+          <Button onClick={stopCamera} variant="outline">キャンセル</Button>
         </div>
       )}
 
