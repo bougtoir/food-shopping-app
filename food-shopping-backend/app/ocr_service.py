@@ -68,17 +68,14 @@ JSON形式で返してください:
                         ]
                     }
                 ],
-                max_tokens=2000
+                max_tokens=2000,
+                response_format={"type": "json_object"}
             )
             
             content = response.choices[0].message.content
             
             import json
-            json_match = re.search(r'\{.*\}', content, re.DOTALL)
-            if json_match:
-                data = json.loads(json_match.group())
-            else:
-                data = json.loads(content)
+            data = json.loads(content)
             
             return OCRResponse(
                 barcode=data.get("barcode"),
