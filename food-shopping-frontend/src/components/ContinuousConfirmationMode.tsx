@@ -28,25 +28,95 @@ export default function ContinuousConfirmationMode() {
 
   const startScanning = async () => {
     try {
+      if (!window.isSecureContext) {
+        setError('カメラアクセスにはHTTPS接続が必要です')
+        return
+      }
+      
+      if (!navigator.mediaDevices?.getUserMedia) {
+        setError('お使いのブラウザはカメラアクセスに対応していません')
+        return
+      }
+
       const html5QrCode = new Html5Qrcode('reader')
       setScanner(html5QrCode)
       
-      await html5QrCode.start(
-        { facingMode: 'environment' },
-        {
-          fps: 10,
-          qrbox: { width: 250, height: 250 }
-        },
-        (decodedText) => {
-          handleBarcodeScanned(decodedText)
-        },
-        () => {}
-      )
+      try {
+        await html5QrCode.start(
+          { facingMode: 'environment' },
+          {
+            fps: 10,
+            qrbox: { width: 250, height: 250 }
+          },
+          (decodedText) => {
+            handleBarcodeScanned(decodedText)
+          },
+          () => {}
+        )
+        setScanning(true)
+        setError(null)
+      } catch (facingModeErr: any) {
+        console.log('facingMode failed, trying deviceId approach', facingModeErr)
+        
+        try {
+          const devices = await navigator.mediaDevices.enumerateDevices()
+          const videoDevices = devices.filter(d => d.kind === 'videoinput')
+          
+          if (videoDevices.length === 0) {
+            throw new Error('カメラが見つかりません')
+          }
+          
+          const backCamera = videoDevices.find(d => 
+            /back|rear|environment/i.test(d.label)
+          ) || videoDevices[videoDevices.length - 1]
+          
+          await html5QrCode.start(
+            { deviceId: { exact: backCamera.deviceId } },
+            {
+              fps: 10,
+              qrbox: { width: 250, height: 250 }
+            },
+            (decodedText) => {
+              handleBarcodeScanned(decodedText)
+            },
+            () => {}
+          )
+          setScanning(true)
+          setError(null)
+        } catch (deviceErr: any) {
+          await html5QrCode.start(
+            { facingMode: 'user' },
+            {
+              fps: 10,
+              qrbox: { width: 250, height: 250 }
+            },
+            (decodedText) => {
+              handleBarcodeScanned(decodedText)
+            },
+            () => {}
+          )
+          setScanning(true)
+          setError(null)
+        }
+      }
+    } catch (err: any) {
+      const errorName = err?.name || 'Error'
+      const errorMsg = err?.message || String(err)
+      console.error('[Camera Error]', errorName, errorMsg, err)
       
-      setScanning(true)
-      setError(null)
-    } catch (err) {
-      setError('カメラへのアクセスに失敗しました')
+      if (errorName === 'NotAllowedError' || errorName === 'PermissionDeniedError') {
+        setError('カメラの使用が拒否されました。ブラウザの設定でカメラへのアクセスを許可してください')
+      } else if (errorName === 'NotFoundError' || errorName === 'DevicesNotFoundError') {
+        setError('カメラが見つかりません')
+      } else if (errorName === 'NotReadableError' || errorName === 'TrackStartError') {
+        setError('カメラが他のアプリで使用中です')
+      } else if (errorName === 'OverconstrainedError') {
+        setError('カメラの設定に問題があります')
+      } else if (errorName === 'SecurityError') {
+        setError('セキュリティエラー: カメラへのアクセスがブロックされています')
+      } else {
+        setError(`カメラエラー: ${errorName} - ${errorMsg}`)
+      }
     }
   }
 

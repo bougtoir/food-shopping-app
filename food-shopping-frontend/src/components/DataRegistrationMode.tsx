@@ -19,15 +19,68 @@ export default function DataRegistrationMode() {
 
   const startCamera = async () => {
     try {
-      const stream = await navigator.mediaDevices.getUserMedia({ 
-        video: { facingMode: 'environment' } 
-      })
-      if (videoRef.current) {
+      if (!window.isSecureContext) {
+        setError('カメラアクセスにはHTTPS接続が必要です')
+        return
+      }
+      
+      if (!navigator.mediaDevices?.getUserMedia) {
+        setError('お使いのブラウザはカメラアクセスに対応していません')
+        return
+      }
+
+      let stream: MediaStream | null = null
+      
+      try {
+        stream = await navigator.mediaDevices.getUserMedia({ 
+          video: { facingMode: 'environment' } 
+        })
+      } catch (facingModeErr) {
+        console.log('facingMode failed, trying deviceId approach', facingModeErr)
+        
+        try {
+          const devices = await navigator.mediaDevices.enumerateDevices()
+          const videoDevices = devices.filter(d => d.kind === 'videoinput')
+          
+          if (videoDevices.length === 0) {
+            throw new Error('カメラが見つかりません')
+          }
+          
+          const backCamera = videoDevices.find(d => 
+            /back|rear|environment/i.test(d.label)
+          ) || videoDevices[videoDevices.length - 1] // fallback to last camera
+          
+          stream = await navigator.mediaDevices.getUserMedia({
+            video: { deviceId: { exact: backCamera.deviceId } }
+          })
+        } catch (deviceErr) {
+          stream = await navigator.mediaDevices.getUserMedia({ video: true })
+        }
+      }
+      
+      if (stream && videoRef.current) {
         videoRef.current.srcObject = stream
         setCameraActive(true)
+        setError(null)
       }
-    } catch (err) {
-      setError('カメラへのアクセスに失敗しました')
+    } catch (err: any) {
+      const errorName = err?.name || 'Error'
+      const errorMsg = err?.message || String(err)
+      console.error('[Camera Error]', errorName, errorMsg, err)
+      
+      if (errorName === 'NotAllowedError' || errorName === 'PermissionDeniedError') {
+        setError('カメラの使用が拒否されました。ブラウザの設定でカメラへのアクセスを許可してください')
+      } else if (errorName === 'NotFoundError' || errorName === 'DevicesNotFoundError') {
+        setError('カメラが見つかりません')
+      } else if (errorName === 'NotReadableError' || errorName === 'TrackStartError') {
+        setError('カメラが他のアプリで使用中です')
+      } else if (errorName === 'OverconstrainedError') {
+        setError('カメラの設定に問題があります')
+      } else if (errorName === 'SecurityError') {
+        setError('セキュリティエラー: カメラへのアクセスがブロックされています')
+      } else {
+        setError(`カメラエラー: ${errorName} - ${errorMsg}`)
+      }
     }
   }
 
