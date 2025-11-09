@@ -116,5 +116,20 @@ class DatabaseService:
             select(FoodItemDB).where(FoodItemDB.barcode == barcode)
         )
         return result.scalar_one_or_none() is not None
+    
+    @staticmethod
+    async def delete_item(session: AsyncSession, barcode: str) -> bool:
+        """Delete an item by barcode. Returns True if deleted, False if not found."""
+        result = await session.execute(
+            select(FoodItemDB).where(FoodItemDB.barcode == barcode)
+        )
+        db_item = result.scalar_one_or_none()
+        
+        if not db_item:
+            return False
+        
+        await session.delete(db_item)
+        await session.commit()
+        return True
 
 db_service = DatabaseService()

@@ -142,3 +142,13 @@ async def search_items(
 async def check_item_exists(barcode: str, session: AsyncSession = Depends(get_db)):
     exists = await db_service.item_exists(session, barcode)
     return {"exists": exists, "barcode": barcode}
+
+@app.delete("/api/items/{barcode}")
+async def delete_item(barcode: str, session: AsyncSession = Depends(get_db)):
+    """Delete an item by barcode"""
+    item = await db_service.get_item_by_barcode(session, barcode)
+    if not item:
+        raise HTTPException(status_code=404, detail="Item not found")
+    
+    await db_service.delete_item(session, barcode)
+    return {"message": "Item deleted successfully", "barcode": barcode}

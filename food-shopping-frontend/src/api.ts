@@ -140,4 +140,14 @@ export const api = {
     }
     return response.json()
   },
+
+  async deleteItem(barcode: string): Promise<{ message: string; barcode: string }> {
+    const response = await fetch(`${API_URL}/api/items/${barcode}`, {
+      method: 'DELETE',
+    })
+    if (!response.ok) {
+      throw new Error('Failed to delete item')
+    }
+    return response.json()
+  },
 }

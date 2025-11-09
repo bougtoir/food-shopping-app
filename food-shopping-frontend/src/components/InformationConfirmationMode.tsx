@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef } from 'react'
 import { Button } from './ui/button'
 import { Alert, AlertDescription } from './ui/alert'
-import { Loader2, Scan, Search, ChevronDown, ChevronUp } from 'lucide-react'
+import { Loader2, Scan, Search, ChevronDown, ChevronUp, Trash2 } from 'lucide-react'
 import { api, FoodItem } from '../api'
 import { Html5Qrcode } from 'html5-qrcode'
 import { Input } from './ui/input'
@@ -23,6 +23,7 @@ export default function InformationConfirmationMode() {
   const [totalPages, setTotalPages] = useState(0)
   const [total, setTotal] = useState(0)
   const [expandedItemId, setExpandedItemId] = useState<string | null>(null)
+  const [deleting, setDeleting] = useState(false)
 
   useEffect(() => {
     if (!scanning) return
@@ -197,6 +198,27 @@ export default function InformationConfirmationMode() {
     setItem(selectedItem)
     setShowBrowse(false)
     setScanning(false)
+  }
+
+  const handleDeleteItem = async () => {
+    if (!item) return
+    
+    if (!confirm(`「${item.name}」を削除してもよろしいですか？`)) {
+      return
+    }
+    
+    setDeleting(true)
+    setError(null)
+    
+    try {
+      await api.deleteItem(item.barcode)
+      setItem(null)
+      setShowBrowse(false)
+    } catch (err) {
+      setError('商品の削除に失敗しました')
+    } finally {
+      setDeleting(false)
+    }
   }
 
   useEffect(() => {
@@ -437,9 +459,27 @@ export default function InformationConfirmationMode() {
             </div>
           </div>
 
-          <div className="text-center">
+          <div className="flex gap-2 justify-center">
             <Button onClick={() => { setItem(null); startScanning(); }}>
               次の商品をスキャン
+            </Button>
+            <Button 
+              onClick={handleDeleteItem} 
+              variant="destructive"
+              disabled={deleting}
+              className="flex items-center gap-2"
+            >
+              {deleting ? (
+                <>
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                  削除中...
+                </>
+              ) : (
+                <>
+                  <Trash2 size={16} />
+                  削除
+                </>
+              )}
             </Button>
           </div>
         </div>
